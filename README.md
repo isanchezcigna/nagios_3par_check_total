@@ -1,4 +1,4 @@
-# nagios_plugins
+# nagios_plugins: HP 3PAR CHECK TOTAL
 Plugins desarrollados para Nagios
 
 
