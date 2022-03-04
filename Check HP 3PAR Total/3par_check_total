@@ -1,0 +1,263 @@
+##ssh=/usr/bin/ssh
+exitCode=3
+while getopts 'M:U:T:O:h' OPT; do
+  case $OPT in
+    M)  storage=$OPTARG;;
+    U)  user=$OPTARG;;
+    T)  tipo=$OPTARG;;
+	O)	opcion=$OPTARG;;
+    h)  hlp="yes";;
+    *)  unknown="yes";;
+  esac
+done
+tmp=/tmp
+conn="ssh $user@$storage"
+HELP="
+	Check HP 3PAR Total (by Ignacio Sanchez rev. 1.0)
+	Uso: $0 [ -M ip -U usuario -T tipo -h]
+    Sintaxis:
+		-M --> Direccion IP Storage
+		-U --> Usuario
+		-T --> Tipo (Capacidad, Bateria, Cages)
+		-O --> Opcion (ID Bateria, Tipo de Capacidad)
+		-h --> Muestra menu de ayuda.
+	Nota:
+		Este plugin utiliza el protocolo SSH y requiere una llave publica de autenticacion para correr."
+		
+if [ "$hlp" = "yes" -o $# -lt 1 ]; then
+    echo "$HELP"
+    exit 0
+fi
+if [ -z $storage ]; then
+	echo "ERROR SINTAXIS: Falta -M IP. Imposible enviar comando. Agregue -h para mostrar menu de ayuda."
+	exitCode=0
+elif [ -z $user ]; then
+	echo "ERROR SINTAXIS: Falta -U Usuario. Imposible enviar comando. Agregue -h para mostrar menu de ayuda."
+	exitCode=0
+elif [ -z $tipo ]; then
+	echo "ERROR SINTAXIS: Falta -T Tipo. Imposible enviar comando. Agregue -h para mostrar menu de ayuda."
+	exitCode=0
+	
+	
+## TIPO CAPACIDAD: ##	
+elif [ $tipo = "capacidad" ]; then
+	if [ -z $opcion ]; then
+		echo "ERROR SINTAXIS: Falta -O Opcion. Imposible enviar comando. Agregue -h para mostrar menu de ayuda."
+		exitCode=0
+	else
+		tmp_file=/tmp/3par_check_capacidad_$capa_$storage.tmp
+		if [ $opcion = "Usable" ]; then
+			$conn showspace > $tmp_file
+		else 
+			$conn showsys "-space" | sed '1d' > $tmp_file
+		fi
+		estado=$(cat $tmp_file |sed -n "1 p" | awk '{print $1}')
+		if [ -z $estado ]; then
+			exitCode=2
+			echo -ne "No se actualizo el archivo\n"
+		else
+			if [ $opcion = "Libre" ]; then
+				capaci_libre=$(cat $tmp_file | sed -n "24 p" | awk '{print $3}' )
+				byte=`echo "$capaci_libre*1024*1024" | bc -l`
+				if [ "$byte" -lt 1099511627776 ] && [ "$byte" -ge 1073741824 ]; then
+					capacidad_libre=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=GB
+				elif [ "$byte" -gt 1099511627776 ]; then
+					capacidad_libre=`echo "scale=2;$byte/(1024*1024*1024*1024)" | bc -l`
+					var=TB
+				elif [ "$byte" -lt 1073741824 ]; then
+					capacidad_libre=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=MB
+				fi
+				echo -ne "Total Free capacity: $capacidad_libre$var\n|'Free_capacity'=$capacidad_libre$var;$warning;$critical;0;0\n"
+			elif [ $opcion = "Total" ]; then	
+				capaci_total=$(cat $tmp_file | sed -n "1 p" | awk '{print $4}' )
+				byte=`echo "$capaci_total*1024*1024" | bc -l`
+				if [ "$byte" -lt 1099511627776 ] && [ "$byte" -ge 1073741824 ]; then
+					capacidad_total=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=GB
+				elif [ "$byte" -gt 1099511627776 ]; then
+					capacidad_total=`echo "scale=2;$byte/(1024*1024*1024*1024)" | bc -l`
+					var=TB
+				elif [ "$byte" -lt 1073741824 ]; then
+					capacidad_total=`echo "scale=2;$byte/(1024*1024)" | bc -l`
+					var=MB
+				fi
+				warning=`echo "scale=2;$capacidad_total*0.85" | bc -l`
+				critical=`echo "scale=2;$capacidad_total*0.9" | bc -l`
+				echo -ne "Total capacity: $capacidad_total$var\n|'capacidad_total'=$capacidad_total$var;$warning;$critical\n"
+			elif [ $opcion = "Usada" ]; then
+				capaci_total=$(cat $tmp_file | sed -n "1 p" | awk '{print $4}' )
+				capaci_used=$(cat $tmp_file | sed -n "2 p" | awk '{print $3}'  )
+				byte_total=`echo "$capaci_total*1024*1024" | bc -l`
+				byte_usada=`echo "$capaci_used*1024*1024" | bc -l`
+				if [ "$byte_total" -lt 1099511627776 ] && [ "$byte_total" -ge 1073741824 ]; then
+					capacidad_total=`echo "scale=2;$byte_total/(1024*1024*1024)" | bc -l`
+				elif [ "$byte_total" -gt 1099511627776 ]; then
+					capacidad_total=`echo "scale=2;$byte_total/(1024*1024*1024*1024)" | bc -l`
+				elif [ "$byte_total" -lt 1073741824 ]; then
+					capacidad_total=`echo "scale=2;$byte_total/(1024*1024)" | bc -l`
+				fi
+				if [ "$byte_usada" -lt 1099511627776 ] && [ "$byte_usada" -ge 1073741824 ]; then
+					capacidad_usada=`echo "scale=2;$byte_usada/(1024*1024*1024)" | bc -l`
+					var=GB
+				elif [ "$byte_usada" -gt 1099511627776 ]; then
+					capacidad_usada=`echo "scale=2;$byte_usada/(1024*1024*1024*1024)" | bc -l`
+					var=TB
+				elif [ "$byte_usada" -lt 1073741824 ]; then
+					capacidad_usada=`echo "scale=2;$byte_usada/(1024*1024)" | bc -l`
+					var=MB
+				fi
+				warning=`echo "scale=2;$capacidad_total*0.85" | bc -l`
+				critical=`echo "scale=2;$capacidad_total*0.9" | bc -l`
+				echo -ne "capacity used: $capacidad_usada$var\n|'capacity_used'=$capacidad_usada$var;$warning;$critical;0.00;$capacidad_total\n"
+			elif [ $opcion = "Fallida" ]; then
+				capaci_failed=$(cat $tmp_file | sed -n "28 p" | awk '{print $3}' )
+				byte=`echo "$capaci_failed*1024*1024" | bc -l`    
+				if [ "$byte" -lt 1099511627776 ] && [ "$byte" -ge 1073741824 ]; then
+					capacidad_failed=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=GB
+				elif [ "$byte" -gt 1099511627776 ]; then
+					capacidad_failed=`echo "scale=2;$byte/(1024*1024*1024*1024)" | bc -l`
+					var=TB
+				elif [ "$byte" -lt 1073741824 ]; then
+					capacidad_failed=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=MB
+				fi
+				echo -ne "Total failed capacity: $capacidad_failed$var\n|'Failed_capacity'=$capacidad_failed$var;$warning;$critical;0;0\n"
+			elif [ $opcion = "Usable" ]; then		
+				usablefree=$(cat $tmp_file | sed -n "3 p" | awk '{print $2}' )
+				byte=`echo "$usablefree*1024*1024" | bc -l`
+				if [ "$byte" -lt 1099511627776 ] && [ "$byte" -ge 1073741824 ]; then
+					usable=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=GB
+				elif [ "$byte" -gt 1099511627776 ]; then
+					usable=`echo "scale=2;$byte/(1024*1024*1024*1024)" | bc -l`
+					var=TB
+				elif [ "$byte" -lt 1073741824 ]; then
+					usable=`echo "scale=2;$byte/(1024*1024*1024)" | bc -l`
+					var=MB
+				fi
+				exitCode=0
+				echo -ne "Usable Free: $usable$var\n|'Usable_free'=$usable$var;$warning;$critical;0;0\n"
+			else
+				echo "ERROR SINTAXIS: Comando Capacidad Incorrecto."
+				exitCode=0
+			fi
+		rm -f $tmp_file
+		fi
+	fi
+elif [ $tipo = "bateria" ]; then
+	tmp_file=$tmp/3par_check_batt_$storage.tmp
+	$conn showbattery | sed '1d' > $tmp_file
+	if [ $? -gt 0 ]; then
+		echo FALLO: Imposible conectar a Storage $storage
+		exit 3
+	else
+		estadobatt=$(cat $tmp_file | sed -n "$opcion p" | awk '{print $5}')
+		echo -ne "Batt $estadobatt\n"
+		if [ $estadobatt = "--" ]; then
+			exitCode=1
+		fi
+		if [ $estadobatt = "NotPresent" ]; then
+			exitCode=1
+		fi
+		if [ $estadobatt = "Failed" ]; then
+			exitCode=2
+		fi
+		if [ $estadobatt = "MaxLifeLow" ]; then
+			exitCode=2
+		fi
+		if [ $estadobatt = "Degraded" ]; then
+			exitCode=1
+		fi
+		ps=$(cat $tmp_file | sed -n "$opcion p" | awk '{print $2}')
+		echo -ne "PS $ps\n"
+		serial=$(cat $tmp_file | sed -n "$opcion p" | awk '{print $4}')
+		echo -ne "Serial $serial\n"
+		rm -f $tmp_file
+	fi
+elif [ $tipo = "cages" ]; then
+	tmp_file=$tmp/3par_check_total_$tipo_$storage.tmp
+	$conn showcage -d > $tmp_file
+	if [ $? -gt 0 ]; then
+		echo FALLO: Imposible conectar a Storage $storage
+		exit 3
+	else
+		if [ `awk '{ if ($0 ~ "------Cage") cage=$5; if ($0 ~ "Failed") print cage" "$0}' $tmp_file|wc -l` -gt 0 ]
+		then
+			echo CRITICAL! The following cages have abnormal status : `awk '{ if ($0 ~ "------Cage") cage=$5; if ($0 ~ "Failed") print cage" "$0}' $tmp_file | tr -s " " | tr -d '\n'`
+			rm -f $tmp_file
+			exit 2
+		else
+			if [ `awk '{ if ($0 ~ "------Cage") cage=$5; if ($0 ~ "Degraded") print cage" "$0}' $tmp_file|wc -l` -gt 0 ]
+			then
+				echo WARNING! The following cages have abnormal status : `awk '{ if ($0 ~ "------Cage") cage=$5; if ($0 ~ "Degraded") print cage" "$0}' $tmp_file | tr -s " " | tr -d '\n'`
+				rm -f $tmp_file
+				exit 1
+			else
+				echo OK : All cages nodes have normal status
+				rm -f $tmp_file
+				exit 0
+			fi
+		fi
+	fi
+elif [ $tipo = "nodes" ]; then
+	tmp_file=$tmp/3par_check_total_nodes_$storage.tmp
+	$conn shownode -s -nohdtot > $tmp_file
+	if [ $? -gt 0 ]; then
+        echo FALLO: Imposible conectar a Storage $storage
+        exit 3
+	fi
+	if [ `grep -c -i failed $tmp_file` -gt 0 ]
+	then
+		echo CRITICAL! The following nodes have abnormal status : `grep -i failed $tmp_file | tr -s " " | tr -d '\n'`
+		rm -f $tmp_file
+	exit 2
+	else
+		if [ `grep -c -i degraded $tmp_file` -gt 0 ]
+		then
+			echo WARNING! The following nodes have abnormal status : `grep -i degraded $tmp_file | tr -s " " | tr -d '\n'`
+			rm -f $tmp_file
+			exit 1
+		else
+			echo OK : All nodes have normal status
+			rm -f $tmp_file
+			exit 0
+		fi
+	fi
+elif [ $tipo = "ssd" ]; then
+	tmp_file=$tmp/3par_check_total_ssd_$storage.tmp
+	$conn showpd -p -devtype SSD -showcols Size_MB,Free_MB > $tmp_file
+	if [ $? -gt 0 ]; then
+        echo FALLO: Imposible conectar a Storage $storage
+        exit 3
+	fi
+	if [ `tail -1 $tmp_file` = "No PDs listed" ]
+	then
+			echo No SSD disks
+			rm -f $tmp_file
+			exit 0
+	fi
+	TOTCAPSSD=`cat $tmp_file | tail -1 | cut -d, -f1`
+	FREECAPSSD=`cat $tmp_file | tail -1 | cut -d, -f2`
+	USEDCAPPCSSD=`expr 100 - ( ( $FREECAPSSD * 100 ) / $TOTCAPSSD )`
+	if [ $USEDCAPPCSSD -ge $PCCRITICALSSD ]; then
+		echo CRITICAL! Used SSD capacity = $USEDCAPPCSSD\% ( > $PCCRITICALSSD\% )
+		rm -f $tmp_file
+		exit 2
+	else
+		if [ $USEDCAPPCSSD -ge $PCWARNINGSSD ]; then
+			echo WARNING! Used SSD capacity = $USEDCAPPCSSD\% ( > $PCWARNINGSSD\% )
+			rm -f $tmp_file
+			exit 1
+		else
+			echo OK : Used SSD capacity = $USEDCAPPCSSD\%
+			rm -f $tmp_file
+			exit 0
+		fi
+	fi
+else
+	echo "ERROR SINTAXIS: Comando no existe."
+	exit 0
+fi
